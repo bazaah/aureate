@@ -2,7 +2,7 @@
 
 Aureate is an data enrichment tool for converting CSV into JSON and YAML
 
-It is written is pure rust and makes use of the [serde](https://serde.rs/) library family for de/serialization, and [simplelog](https://github.com/Drakulix/simplelog.rs) for logging
+It is written in pure rust and makes use of the [serde](https://serde.rs/) library family for de/serialization, and [simplelog](https://github.com/Drakulix/simplelog.rs) for logging
 
 ### USAGE
 
