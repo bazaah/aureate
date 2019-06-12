@@ -233,7 +233,7 @@ pub fn compose(_opts: &ProgramArgs, data: (Vec<String>, Vec<Record>)) -> Vec<Map
             loop {
                 let h_item = headers.next();
                 let r_item = records.next();
-                trace!("header: {:?}, record: {:?}", h_item, r_item);
+                trace!("header: {:?}, field: {:?}", h_item, r_item);
 
                 if h_item != None || r_item != None {
                     let h_json = match h_item {
