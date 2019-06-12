@@ -6,7 +6,6 @@ use {
     std::{
         boxed::Box,
         collections::BTreeMap,
-        convert::TryInto,
         error::Error,
         fmt::Debug,
         fs::File,
@@ -134,10 +133,12 @@ where
     // Parse records
     let records = rdr
         .records()
+        // Skip rows which error based on the CSV parser options, with a warning
         .filter_map(|result| match result {
             Ok(r) => Some(r),
             Err(e) => match_with_log!(None, warn!("Failed to parse record: {}, skipping...", e)),
         })
+        // Parse CSV into a useable format and add metadata necessary for the conversion
         .map(|record| {
             record
                 .iter()
@@ -158,6 +159,7 @@ where
                 highest_num_fields = wrapper.highest;
             }
         })
+        // Strip CSV data from internal structures
         .map(|wrapper| {
             let RecordWrapper { record, .. } = wrapper;
             record
@@ -171,6 +173,8 @@ where
     let headers: Vec<String>;
     let h_count = h.len();
     let hnf = highest_num_fields as usize;
+
+    // If row length is non-uniform add additional placeholder rows
     if hnf > h_count {
         let additional = (h_count + 1..=hnf)
             .into_iter()
@@ -181,6 +185,7 @@ where
             .chain(additional)
             .collect::<Vec<String>>();
         headers = tmp
+    // Otherwise use the standard headers
     } else {
         let tmp = h.iter().map(|h| h.to_string()).collect::<Vec<String>>();
 
