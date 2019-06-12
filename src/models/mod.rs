@@ -1,32 +1,25 @@
 use {
-    crate::cli::ProgramArgs,
+    crate::{
+        cli::ProgramArgs,
+        match_with_log,
+        models::assets::{OutputFormat, ReadFrom, Record},
+    },
     csv::ReaderBuilder,
     serde::Serialize,
     serde_json::{map::Map, value::Value as JVal},
     std::{
         boxed::Box,
-        collections::BTreeMap,
+        collections::BTreeSet,
         error::Error,
-        fmt::Debug,
         fs::File,
         io::{stdin as cin, stdout as cout, Read as ioRead, Write as ioWrite},
-        iter,
-        iter::{FromIterator, Iterator},
-        mem,
-        ops::Try,
         path::PathBuf,
-        process::Termination,
         vec::Vec,
     },
 };
 
-// Convenience macro for logging match arms
-macro_rules! match_with_log {
-    ( $val:expr, $log:expr) => {{
-        $log;
-        $val
-    }};
-}
+pub mod assets;
+pub mod error;
 
 // Determines write destination from runtime args
 pub fn get_writer(w: &Option<String>) -> Box<dyn ioWrite> {
@@ -43,13 +36,6 @@ pub fn get_writer(w: &Option<String>) -> Box<dyn ioWrite> {
             info!("No file detected, defaulting to stdout...")
         ),
     }
-}
-
-// Supported read source options
-#[derive(Debug)]
-pub enum ReadFrom {
-    File(PathBuf),
-    Stdin,
 }
 
 // Helper function for generating a list of read sources at runtime
@@ -91,28 +77,12 @@ pub fn set_reader(src: &Option<ReadFrom>) -> Box<dyn ioRead> {
     }
 }
 
-// Displays either 'Stdin' or a file, if file contains non ASCII
-// characters, they are replaced with � (U+FFFD)
-impl std::fmt::Display for ReadFrom {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        let display = match self {
-            ReadFrom::File(path) => format!(
-                "File: {}",
-                path.file_name().unwrap_or_default().to_string_lossy()
-            ),
-            ReadFrom::Stdin => format!("Stdin"),
-        };
-
-        write!(f, "{}", display)
-    }
-}
-
 // Parses CSV source into a manipulatable format
 // that other functions can use to build JSON/YAML structures
 pub fn csv_from_source<R>(
     opts: &ProgramArgs,
     src: R,
-) -> Result<(Vec<String>, Vec<Record>), Box<dyn Error>>
+) -> Result<(BTreeSet<String>, Vec<Record>), Box<dyn Error>>
 where
     R: ioRead,
 {
@@ -142,15 +112,9 @@ where
         .map(|record| {
             record
                 .iter()
-                .identify_first_last()
-                .map(|(_, last, field)| (last, field.to_string()))
-                .scan(0u64, |count, (last_record, record)| {
+                .map(|field| field.to_string())
+                .scan(0u64, |count, record| {
                     *count += 1;
-                    // if last_record == true {
-                    //     Some((*count, record))
-                    // } else {
-                    //     Some((0, record))
-                    // }
                     Some((*count, record))
                 })
                 .collect::<Record>()
@@ -164,63 +128,60 @@ where
 
     info!("Highest record field length: {}", highest_num_fields);
 
-    //Parse headers
+    // Parse headers
     let h = rdr.headers()?;
-    let headers: Vec<String>;
+    let mut dictionary: BTreeSet<String> = BTreeSet::new();
     let h_count = h.len();
     let hnf = highest_num_fields as usize;
 
-    // If row length is non-uniform add additional placeholder rows
-    if hnf > h_count {
-        let additional = (h_count + 1..=hnf)
-            .into_iter()
-            .map(|num| format!("FIELD_{}", num));
-        let tmp = h
-            .iter()
-            .map(|h| h.to_string())
-            .chain(additional)
-            .collect::<Vec<String>>();
-        headers = tmp
-    // Otherwise use the standard headers
-    } else {
-        let tmp = h.iter().map(|h| h.to_string()).collect::<Vec<String>>();
-
-        headers = tmp
-    }
-
-    Ok((headers, records))
-}
-
-pub struct Record {
-    pub data: Vec<String>,
-    pub field_count: u64,
-}
-
-impl FromIterator<(u64, String)> for Record {
-    fn from_iter<I: IntoIterator<Item = (u64, String)>>(iter: I) -> Self {
-        // Shadowed iter here
-        let iter = iter.into_iter();
-        let mut field_count = 0u64;
-        let mut data = match iter.size_hint() {
-            (_, Some(ub)) => Vec::with_capacity(ub),
-            (lb, None) => Vec::with_capacity(lb),
-        };
-
-        for (c, v) in iter {
-            data.push(v);
-
-            if c > field_count {
-                field_count = c
-            }
+    // Adds additional headers if any record row's length > header row length
+    let mut iter_ptr_a;
+    let mut iter_ptr_b;
+    let iter: &mut dyn Iterator<Item = (usize, String)> = match hnf > h_count {
+        true => {
+            let additional = (h_count + 1..=hnf)
+                .into_iter()
+                .map(|num| format!("__HEADER__{}", num));
+            iter_ptr_a = h
+                .iter()
+                .map(|h| h.to_string())
+                .chain(additional)
+                .enumerate();
+            &mut iter_ptr_a
         }
+        false => {
+            iter_ptr_b = h.iter().map(|h| h.to_string()).enumerate();
+            &mut iter_ptr_b
+        }
+    };
+    // Deduplicate headers and add them to a dictionary
+    iter.for_each(|(index, header)| {
+        if !dictionary.insert(header) {
+            let replacement = format!("__HEADER__{}", index);
+            let tail = match index {
+                i if i == 1 => format_args!("st"),
+                i if i == 2 => format_args!("nd"),
+                i if i == 3 => format_args!("rd"),
+                _ => format_args!("th"),
+            };
+            warn!(
+                "{}{} header is a duplicate, replacing with: {}",
+                index, tail, replacement
+            );
 
-        Record { data, field_count }
-    }
+            dictionary.insert(replacement);
+        }
+    });
+
+    Ok((dictionary, records))
 }
 
 // JSON builder function, as JSON is a subset (mostly)
 // of YAML this function also builds YAML representable data
-pub fn compose(_opts: &ProgramArgs, data: (Vec<String>, Vec<Record>)) -> Vec<Map<String, JVal>> {
+pub fn compose(
+    _opts: &ProgramArgs,
+    data: (BTreeSet<String>, Vec<Record>),
+) -> Vec<Map<String, JVal>> {
     let (header, record_list) = data;
     let hdr = header.iter().map(|s| &**s).collect::<Vec<&str>>();
 
@@ -258,15 +219,15 @@ pub fn compose(_opts: &ProgramArgs, data: (Vec<String>, Vec<Record>)) -> Vec<Map
 
 // Serialization of the composed data occurs here
 pub fn outwriter<W, S: ?Sized>(
+    opts: &ProgramArgs,
     writer: W,
     output: &S,
-    format: &OutputFormat,
 ) -> Result<(), Box<dyn Error>>
 where
     W: ioWrite,
     S: Serialize,
 {
-    match *format {
+    match opts.output_type() {
         OutputFormat::JsonPretty => match_with_log!(
             match serde_json::to_writer_pretty(writer, &output) {
                 Ok(_) => Ok(()),
@@ -288,133 +249,5 @@ where
             },
             info!("Using Yaml writer")
         ),
-    }
-}
-
-// Supported serialization formats
-#[derive(Debug, Clone, Copy)]
-pub enum OutputFormat {
-    Json,
-    JsonPretty,
-    Yaml,
-}
-
-impl std::fmt::Display for OutputFormat {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        let display = match *self {
-            OutputFormat::Json => "Json",
-            OutputFormat::JsonPretty => "Pretty Json",
-            OutputFormat::Yaml => "Yaml",
-        };
-
-        write!(f, "{}", display)
-    }
-}
-
-pub trait IdentifyFirstLast: Iterator + Sized {
-    fn identify_first_last(self) -> FirstLast<Self>;
-}
-
-impl<I> IdentifyFirstLast for I
-where
-    I: Iterator,
-{
-    fn identify_first_last(self) -> FirstLast<Self> {
-        FirstLast(true, self.peekable())
-    }
-}
-
-pub struct FirstLast<I>(bool, iter::Peekable<I>)
-where
-    I: Iterator;
-
-impl<I> Iterator for FirstLast<I>
-where
-    I: Iterator,
-{
-    type Item = (bool, bool, I::Item);
-
-    fn next(&mut self) -> Option<Self::Item> {
-        let first = mem::replace(&mut self.0, false);
-        self.1.next().map(|e| (first, self.1.peek().is_none(), e))
-    }
-}
-
-// Error Handling below
-#[derive(Debug, Clone)]
-pub enum ErrorKind {
-    Generic,
-}
-
-impl From<ErrorKind> for i32 {
-    fn from(err: ErrorKind) -> Self {
-        match err {
-            ErrorKind::Generic => 1,
-        }
-    }
-}
-
-impl From<std::option::NoneError> for ErrorKind {
-    fn from(_: std::option::NoneError) -> Self {
-        ErrorKind::Generic
-    }
-}
-
-impl From<Box<dyn Error>> for ErrorKind {
-    fn from(_: Box<dyn Error>) -> Self {
-        ErrorKind::Generic
-    }
-}
-
-impl std::fmt::Display for ErrorKind {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        write!(f, "Generic Error")
-    }
-}
-
-impl Error for ErrorKind {
-    fn source(&self) -> Option<&(dyn Error + 'static)> {
-        // Generic error, underlying cause isn't tracked.
-        None
-    }
-}
-
-pub enum ProgramExit<T>
-where
-    T: Error,
-{
-    Success,
-    Failure(T),
-}
-
-impl<T: Into<i32> + Debug + Error> Termination for ProgramExit<T> {
-    fn report(self) -> i32 {
-        match self {
-            ProgramExit::Success => 0,
-            ProgramExit::Failure(err) => {
-                error!("Program exited with error: {}", err);
-                err.into()
-            }
-        }
-    }
-}
-
-impl<T: Error> Try for ProgramExit<T> {
-    type Ok = ();
-    type Error = T;
-
-    fn into_result(self) -> Result<Self::Ok, Self::Error> {
-        match self {
-            ProgramExit::Success => Ok(()),
-            ProgramExit::Failure(err) => Err(err),
-        }
-    }
-
-    fn from_error(err: Self::Error) -> Self {
-        ProgramExit::Failure(err)
-    }
-
-    fn from_ok(_: Self::Ok) -> Self {
-        ProgramExit::Success
     }
 }

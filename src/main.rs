@@ -6,7 +6,8 @@ use {
     crate::{
         cli::{generate_cli, ProgramArgs},
         models::{
-            compose, csv_from_source, get_writer, outwriter, set_reader, ErrorKind, ProgramExit,
+            compose, csv_from_source, get_writer, outwriter, set_reader,
+            error::{ErrorKind, ProgramExit}
         },
     },
     simplelog::*,
@@ -31,8 +32,7 @@ fn main() -> ProgramExit<ErrorKind> {
         let parsed = csv_from_source(&cli, set_reader(source))?;
 
         let output = compose(&cli, parsed);
-        let ot = cli.output_type().clone();
-        outwriter(&mut writer, &output, &ot)?
+        outwriter(&cli, &mut writer, &output)?
     }
 
     ProgramExit::Success

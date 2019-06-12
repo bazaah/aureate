@@ -1,5 +1,8 @@
 use {
-    crate::models::{get_reader, OutputFormat, ReadFrom},
+    crate::models::{
+        assets::{OutputFormat, ReadFrom},
+        get_reader,
+    },
     clap::{crate_authors, crate_version, App, Arg, ArgMatches as Matches, SubCommand},
     csv::Trim,
     simplelog::LevelFilter,
@@ -272,8 +275,8 @@ impl<'a> ProgramArgs<'a> {
         self.debug_level
     }
 
-    pub fn output_type(&self) -> &OutputFormat {
-        &self.output_type
+    pub fn output_type(&self) -> OutputFormat {
+        self.output_type
     }
 
     pub fn reader_list(&self) -> &Vec<Option<ReadFrom>> {
