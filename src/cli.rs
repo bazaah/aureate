@@ -122,7 +122,7 @@ pub fn generate_cli<'a>() -> Matches<'a> {
 }
 
 pub struct ProgramArgs<'a> {
-    //Program
+    // Program
     _store: Matches<'a>,
     debug_level: LevelFilter,
     output_type: OutputFormat,
