@@ -81,7 +81,7 @@ pub fn set_reader(src: &Option<ReadFrom>) -> Box<dyn ioRead> {
 // that other functions can use to build JSON/YAML structures
 pub fn csv_from_source<R>(
     opts: &ProgramArgs,
-    src: R,
+    source: R,
 ) -> Result<(Vec<String>, Vec<Record>), Box<dyn Error>>
 where
     R: ioRead,
@@ -95,10 +95,10 @@ where
         .trim(opts.trim_settings())
         .double_quote(opts.quote_settings().0)
         .quoting(opts.quote_settings().1)
-        .from_reader(src);
+        .from_reader(source);
 
-    // Keeping track of highest row length
-    let mut highest_num_fields = 0u64;
+    // Track maximum record row length
+    let mut max_record_fields = 0u64;
 
     // Parse records
     let records = rdr
@@ -120,37 +120,37 @@ where
                 .collect::<Record>()
         })
         .inspect(|wrapper| {
-            if highest_num_fields < wrapper.field_count {
-                highest_num_fields = wrapper.field_count;
+            if max_record_fields < wrapper.field_count {
+                max_record_fields = wrapper.field_count;
             }
         })
         .collect::<Vec<Record>>();
 
-    info!("Highest record field length: {}", highest_num_fields);
+    info!("Highest record field length: {}", max_record_fields);
 
     // Parse headers
-    let h = rdr.headers()?;
-    let h_count = h.len();
-    let hnf = highest_num_fields as usize;
+    let csv_headers = rdr.headers()?;
+    let hdr_fields = csv_headers.len();
+    let max_fields = max_record_fields as usize;
 
     // Adds additional headers if any record row's length > header row length
-    let mut iter_ptr_a;
-    let mut iter_ptr_b;
-    let iter: &mut dyn Iterator<Item = (usize, String)> = match hnf > h_count {
+    let mut iter_binding_a;
+    let mut iter_binding_b;
+    let iter: &mut dyn Iterator<Item = (usize, String)> = match max_fields > hdr_fields {
         true => {
-            let additional = (h_count + 1..=hnf)
+            let additional = (hdr_fields + 1..=max_fields)
                 .into_iter()
                 .map(|num| format!("__HEADER__{}", num));
-            iter_ptr_a = h
+            iter_binding_a = csv_headers
                 .iter()
                 .map(|h| h.to_string())
                 .chain(additional)
                 .enumerate();
-            &mut iter_ptr_a
+            &mut iter_binding_a
         }
         false => {
-            iter_ptr_b = h.iter().map(|h| h.to_string()).enumerate();
-            &mut iter_ptr_b
+            iter_binding_b = csv_headers.iter().map(|h| h.to_string()).enumerate();
+            &mut iter_binding_b
         }
     };
     // Deduplicate headers and build the Json sanitized headers list
@@ -165,8 +165,8 @@ where
                     _ => format_args!("th"),
                 };
                 warn!(
-                    "{}{} header is a duplicate, replacing with: {}",
-                    index, tail, replacement
+                    "{}{} header is a duplicate! replacing [{}] with: [{}]",
+                    index, tail, &header, replacement
                 );
 
                 dictionary.insert(replacement.clone());
