@@ -11,7 +11,7 @@ use {
         fs::File,
         io::{stdin as cin, stdout as cout, Read as ioRead, Write as ioWrite},
         iter,
-        iter::FromIterator,
+        iter::{FromIterator, Iterator},
         mem,
         ops::Try,
         path::PathBuf,
@@ -112,7 +112,7 @@ impl std::fmt::Display for ReadFrom {
 pub fn csv_from_source<R>(
     opts: &ProgramArgs,
     src: R,
-) -> Result<(Vec<String>, Vec<Vec<String>>), Box<dyn Error>>
+) -> Result<(Vec<String>, Vec<Record>), Box<dyn Error>>
 where
     R: ioRead,
 {
@@ -146,25 +146,21 @@ where
                 .map(|(_, last, field)| (last, field.to_string()))
                 .scan(0u64, |count, (last_record, record)| {
                     *count += 1;
-                    if last_record == true {
-                        Some((*count, record))
-                    } else {
-                        Some((0, record))
-                    }
+                    // if last_record == true {
+                    //     Some((*count, record))
+                    // } else {
+                    //     Some((0, record))
+                    // }
+                    Some((*count, record))
                 })
-                .collect::<RecordWrapper>()
+                .collect::<Record>()
         })
         .inspect(|wrapper| {
-            if highest_num_fields < wrapper.highest {
-                highest_num_fields = wrapper.highest;
+            if highest_num_fields < wrapper.field_count {
+                highest_num_fields = wrapper.field_count;
             }
         })
-        // Strip CSV data from internal structures
-        .map(|wrapper| {
-            let RecordWrapper { record, .. } = wrapper;
-            record
-        })
-        .collect::<Vec<Vec<String>>>();
+        .collect::<Vec<Record>>();
 
     info!("Highest record field length: {}", highest_num_fields);
 
@@ -195,42 +191,44 @@ where
     Ok((headers, records))
 }
 
-struct RecordWrapper {
-    pub highest: u64,
-    pub record: Vec<String>,
+pub struct Record {
+    pub data: Vec<String>,
+    pub field_count: u64,
 }
 
-impl FromIterator<(u64, String)> for RecordWrapper {
+impl FromIterator<(u64, String)> for Record {
     fn from_iter<I: IntoIterator<Item = (u64, String)>>(iter: I) -> Self {
-        let mut highest = 0u64;
-        let mut record = Vec::new();
+        // Shadowed iter here
+        let iter = iter.into_iter();
+        let mut field_count = 0u64;
+        let mut data = match iter.size_hint() {
+            (_, Some(ub)) => Vec::with_capacity(ub),
+            (lb, None) => Vec::with_capacity(lb),
+        };
 
         for (c, v) in iter {
-            record.push(v);
+            data.push(v);
 
-            if c > highest {
-                highest = c
+            if c > field_count {
+                field_count = c
             }
         }
 
-        RecordWrapper { highest, record }
+        Record { data, field_count }
     }
 }
 
 // JSON builder function, as JSON is a subset (mostly)
 // of YAML this function also builds YAML representable data
-pub fn compose(
-    _opts: &ProgramArgs,
-    data: (Vec<String>, Vec<Vec<String>>),
-) -> Vec<Map<String, JVal>> {
+pub fn compose(_opts: &ProgramArgs, data: (Vec<String>, Vec<Record>)) -> Vec<Map<String, JVal>> {
     let (header, record_list) = data;
     let hdr = header.iter().map(|s| &**s).collect::<Vec<&str>>();
 
     record_list
         .into_iter()
         .map(|record| {
-            let mut headers = hdr.iter();
-            let mut records = record.iter();
+            let mut headers = hdr.iter().take(record.field_count as usize);
+            let mut records = record.data.iter();
             let mut output = Map::new();
             loop {
                 let h_item = headers.next();
