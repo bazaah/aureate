@@ -82,7 +82,7 @@ pub fn set_reader(src: &Option<ReadFrom>) -> Box<dyn ioRead> {
 pub fn csv_from_source<R>(
     opts: &ProgramArgs,
     src: R,
-) -> Result<(BTreeSet<String>, Vec<Record>), Box<dyn Error>>
+) -> Result<(Vec<String>, Vec<Record>), Box<dyn Error>>
 where
     R: ioRead,
 {
@@ -130,7 +130,6 @@ where
 
     // Parse headers
     let h = rdr.headers()?;
-    let mut dictionary: BTreeSet<String> = BTreeSet::new();
     let h_count = h.len();
     let hnf = highest_num_fields as usize;
 
@@ -154,34 +153,36 @@ where
             &mut iter_ptr_b
         }
     };
-    // Deduplicate headers and add them to a dictionary
-    iter.for_each(|(index, header)| {
-        if !dictionary.insert(header) {
-            let replacement = format!("__HEADER__{}", index);
-            let tail = match index {
-                i if i == 1 => format_args!("st"),
-                i if i == 2 => format_args!("nd"),
-                i if i == 3 => format_args!("rd"),
-                _ => format_args!("th"),
-            };
-            warn!(
-                "{}{} header is a duplicate, replacing with: {}",
-                index, tail, replacement
-            );
+    // Deduplicate headers and build the Json sanitized headers list
+    let headers = iter
+        .scan(BTreeSet::new(), |dictionary, (index, header)| {
+            if !dictionary.insert(header.clone()) {
+                let replacement = format!("__HEADER__{}", index);
+                let tail = match index {
+                    i if i == 1 => format_args!("st"),
+                    i if i == 2 => format_args!("nd"),
+                    i if i == 3 => format_args!("rd"),
+                    _ => format_args!("th"),
+                };
+                warn!(
+                    "{}{} header is a duplicate, replacing with: {}",
+                    index, tail, replacement
+                );
 
-            dictionary.insert(replacement);
-        }
-    });
+                dictionary.insert(replacement.clone());
+                Some(replacement)
+            } else {
+                Some(header)
+            }
+        })
+        .collect::<Vec<String>>();
 
-    Ok((dictionary, records))
+    Ok((headers, records))
 }
 
 // JSON builder function, as JSON is a subset (mostly)
 // of YAML this function also builds YAML representable data
-pub fn compose(
-    _opts: &ProgramArgs,
-    data: (BTreeSet<String>, Vec<Record>),
-) -> Vec<Map<String, JVal>> {
+pub fn compose(_opts: &ProgramArgs, data: (Vec<String>, Vec<Record>)) -> Vec<Map<String, JVal>> {
     let (header, record_list) = data;
     let hdr = header.iter().map(|s| &**s).collect::<Vec<&str>>();
 
