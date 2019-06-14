@@ -1,8 +1,13 @@
-use std::{
-    iter,
-    iter::{FromIterator, Iterator},
-    mem,
-    path::PathBuf,
+use {
+    serde::Serialize,
+    serde_json::{map::Map as JMap, value::Value as JsonValue},
+    serde_yaml::{Mapping as YMap, Value as YamlValue},
+    std::{
+        iter,
+        iter::{FromIterator, Iterator},
+        mem,
+        path::PathBuf,
+    },
 };
 
 // Convenience macro for logging match arms
@@ -12,6 +17,86 @@ macro_rules! match_with_log {
         $log;
         $val
     }};
+}
+
+// Transparent helper enum for hinting to the outwriter
+// What the underlying data structure is
+#[derive(Serialize)]
+#[serde(untagged)]
+pub enum Output {
+    Json(JsonValue),
+    Yaml(YamlValue),
+}
+
+// Helper function for building Json compliant memory representations
+pub fn build_json(hdr: Vec<&str>, record_list: Vec<Record>) -> JsonValue {
+    record_list
+        .into_iter()
+        .map(|record| {
+            let mut headers = hdr.iter().take(record.field_count as usize);
+            let mut records = record.data.iter();
+            let mut output = JMap::new();
+            loop {
+                let h_item = headers.next();
+                let r_item = records.next();
+                trace!("header: {:?}, field: {:?}", h_item, r_item);
+
+                if h_item != None || r_item != None {
+                    let h_json = match h_item {
+                        Some(hdr) => hdr,
+                        None => "",
+                    };
+                    let r_json = match r_item {
+                        Some(rcd) => rcd,
+                        None => "",
+                    };
+                    output.insert(h_json.to_string(), JsonValue::String(r_json.to_string()));
+                } else {
+                    break;
+                }
+            }
+            trace!("Map contents: {:?}", &output);
+
+            output
+        })
+        .collect::<JsonValue>()
+}
+
+// Helper function for building Yaml compliant memory representations
+pub fn build_yaml(hdr: Vec<&str>, record_list: Vec<Record>) -> YamlValue {
+    record_list
+        .into_iter()
+        .map(|record| {
+            let mut headers = hdr.iter().take(record.field_count as usize);
+            let mut records = record.data.iter();
+            let mut output = YMap::new();
+            loop {
+                let h_item = headers.next();
+                let r_item = records.next();
+                trace!("header: {:?}, field: {:?}", h_item, r_item);
+
+                if h_item != None || r_item != None {
+                    let h_json = match h_item {
+                        Some(hdr) => hdr,
+                        None => "",
+                    };
+                    let r_json = match r_item {
+                        Some(rcd) => rcd,
+                        None => "",
+                    };
+                    output.insert(
+                        YamlValue::String(h_json.to_string()),
+                        YamlValue::String(r_json.to_string()),
+                    );
+                } else {
+                    break;
+                }
+            }
+            trace!("Map contents: {:?}", &output);
+
+            output
+        })
+        .collect::<YamlValue>()
 }
 
 // Supported read source options

@@ -2,11 +2,10 @@ use {
     crate::{
         cli::ProgramArgs,
         match_with_log,
-        models::assets::{OutputFormat, ReadFrom, Record},
+        models::assets::{build_json, build_yaml, Output, OutputFormat, ReadFrom, Record},
     },
     csv::ReaderBuilder,
     serde::Serialize,
-    serde_json::{map::Map, value::Value as JVal},
     std::{
         boxed::Box,
         collections::BTreeSet,
@@ -182,40 +181,15 @@ where
 
 // JSON builder function, as JSON is a subset (mostly)
 // of YAML this function also builds YAML representable data
-pub fn compose(_opts: &ProgramArgs, data: (Vec<String>, Vec<Record>)) -> Vec<Map<String, JVal>> {
+pub fn compose(opts: &ProgramArgs, data: (Vec<String>, Vec<Record>)) -> Output {
     let (header, record_list) = data;
     let hdr = header.iter().map(|s| &**s).collect::<Vec<&str>>();
 
-    record_list
-        .into_iter()
-        .map(|record| {
-            let mut headers = hdr.iter().take(record.field_count as usize);
-            let mut records = record.data.iter();
-            let mut output = Map::new();
-            loop {
-                let h_item = headers.next();
-                let r_item = records.next();
-                trace!("header: {:?}, field: {:?}", h_item, r_item);
-
-                if h_item != None || r_item != None {
-                    let h_json = match h_item {
-                        Some(hdr) => hdr,
-                        None => "",
-                    };
-                    let r_json = match r_item {
-                        Some(rcd) => rcd,
-                        None => "",
-                    };
-                    output.insert(h_json.to_string(), JVal::String(r_json.to_string()));
-                } else {
-                    break;
-                }
-            }
-            trace!("Map contents: {:?}", &output);
-
-            output
-        })
-        .collect::<Vec<Map<String, JVal>>>()
+    match opts.output_type() {
+        OutputFormat::Json => Output::Json(build_json(hdr, record_list)),
+        OutputFormat::JsonPretty => Output::Json(build_json(hdr, record_list)),
+        OutputFormat::Yaml => Output::Yaml(build_yaml(hdr, record_list)),
+    }
 }
 
 // Serialization of the composed data occurs here
