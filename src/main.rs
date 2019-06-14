@@ -6,8 +6,9 @@ use {
     crate::{
         cli::{generate_cli, ProgramArgs},
         models::{
-            compose, csv_from_source, get_writer, outwriter, set_reader,
-            error::{ErrorKind, ProgramExit}
+            compose, csv_from_source,
+            error::{ErrorKind, ProgramExit},
+            get_writer, outwriter, set_reader,
         },
     },
     simplelog::*,

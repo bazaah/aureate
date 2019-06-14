@@ -26,14 +26,15 @@ It is written in pure rust and makes use of the [serde](https://serde.rs/) libra
 
     Settings related to fine-tuning the CSV reader
 
-    * #### USAGE:
+    * #### USAGE
 
             aureate csv [FLAGS] [OPTIONS]
 
-    * #### FLAGS:
+    * #### FLAGS
+
         * `--flexible`    Prevents program from erroring on non-uniform row fields
 
-    * #### OPTIONS:
+    * #### OPTIONS
 
         * `-c, --comment <CHAR>`              Specify your CSV comment character
         * `-s, --delimiter <CHAR>`            Specify your CSV delimiter [default: ,]
@@ -46,6 +47,6 @@ It is written in pure rust and makes use of the [serde](https://serde.rs/) libra
 
     Prints help of the given subcommand
 
-    * #### USAGE:
+    * #### USAGE
 
             aureate help [SUBCOMMAND]
