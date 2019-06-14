@@ -234,7 +234,7 @@ impl<'a> ProgramArgs<'a> {
                     CSVOption::QuoteSettings(match csv.value_of("quote_settings_csv") {
                         Some(level) => match level {
                             "double" => (false, true),
-                            "all" => (true, false),
+                            "all" => (false, false),
                             _ => unreachable!(),
                         },
                         None => (true, true),
