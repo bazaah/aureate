@@ -22,6 +22,12 @@ pub fn generate_cli<'a>() -> Matches<'a> {
                 .takes_value(false)
                 .help("Sets level of debug output"),
         )
+        .arg(Arg::with_name("quiet")
+                .short("q")
+                .long("quiet")
+                .takes_value(false)
+                .help("Silences error messages")
+        )
         .arg(
             Arg::with_name("format")
                 .short("f")
@@ -143,13 +149,11 @@ pub struct ProgramArgs<'a> {
 
 impl<'a> ProgramArgs<'a> {
     pub fn init(store: Matches<'a>) -> Self {
-        let debug_level = match store.occurrences_of("verbosity") {
-            0 => LevelFilter::Off,
-            1 => LevelFilter::Error,
-            2 => LevelFilter::Warn,
-            3 => LevelFilter::Info,
-            4 => LevelFilter::Debug,
-            _ => LevelFilter::Trace,
+        let debug_level = match (store.occurrences_of("verbosity"), store.is_present("quiet")) {
+            (_, true) => LevelFilter::Off,
+            (0, false) => LevelFilter::Info,
+            (1, false) => LevelFilter::Debug,
+            (_, false) => LevelFilter::Trace,
         };
 
         let output_type = match store.value_of("format") {
