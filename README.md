@@ -12,7 +12,9 @@ It is written in pure rust and makes use of the [serde](https://serde.rs/) libra
 
 * `-h, --help`       Prints help information
 * `-V, --version`    Prints version information
-* `-v ...`           Sets level of debug output 
+* `-a, --append`     Append to output file, instead of overwriting
+* `-q, --quiet`      Silences error messages
+* `-v ...`           Sets level of debug output
 
 #### OPTIONS
 
