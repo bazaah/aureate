@@ -10,7 +10,7 @@ use {
         boxed::Box,
         collections::BTreeSet,
         error::Error,
-        fs::File,
+        fs::{File, OpenOptions},
         io::{stdin as cin, stdout as cout, Read as ioRead, Write as ioWrite},
         path::PathBuf,
         vec::Vec,
@@ -21,16 +21,27 @@ pub mod assets;
 pub mod error;
 
 // Determines write destination from runtime args
-pub fn get_writer(w: &Option<String>) -> Box<dyn ioWrite> {
+// w: (_, bool), true => append, false => create
+pub fn get_writer(w: &(Option<String>, bool)) -> Box<dyn ioWrite> {
     match w {
-        Some(file_name) => match_with_log!(
+        (Some(file_name), false) => match_with_log!(
             match File::create(file_name).ok() {
                 Some(file) => match_with_log!(Box::new(file), info!("Success!")),
                 None => match_with_log!(Box::new(cout()), warn!("Failed! Switching to stdout...")),
             },
             info!("Attempting to create {}...", file_name)
         ),
-        None => match_with_log!(
+        (Some(file_name), true) => match_with_log!(
+            match OpenOptions::new().append(true).open(file_name) {
+                Ok(file) => match_with_log!(Box::new(file), info!("Success!")),
+                Err(e) => match_with_log!(
+                    Box::new(cout()),
+                    warn!("Unable to open file: {}, switching to stdout...", e)
+                ),
+            },
+            info!("Attempting to append to {}...", file_name)
+        ),
+        (None, _) => match_with_log!(
             Box::new(cout()),
             info!("No file detected, defaulting to stdout...")
         ),

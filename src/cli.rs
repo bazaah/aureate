@@ -28,6 +28,13 @@ pub fn generate_cli<'a>() -> Matches<'a> {
                 .takes_value(false)
                 .help("Silences error messages")
         )
+        .arg(Arg::with_name("append")
+                .short("a")
+                .long("append")
+                .takes_value(false)
+                .help("Append to output file, instead of overwriting")
+                .long_help("Append to output file, instead of overwriting... has no effect if writing to stdout")
+        )
         .arg(
             Arg::with_name("format")
                 .short("f")
@@ -136,7 +143,7 @@ pub struct ProgramArgs<'a> {
     debug_level: LevelFilter,
     output_type: OutputFormat,
     reader: Vec<Option<ReadFrom>>,
-    writer: Option<String>,
+    writer: (Option<String>, bool),
     // CSV
     flexible_csv: CSVOption,
     delimiter_csv: CSVOption,
@@ -178,9 +185,10 @@ impl<'a> ProgramArgs<'a> {
                 vec
             }
         };
-        let writer = match store.value_of("output") {
-            Some(s) => Some(s.to_string()),
-            None => None,
+        let writer = match (store.value_of("output"), store.is_present("append")) {
+            (Some(s), false) => (Some(s.to_string()), false),
+            (Some(s), true) => (Some(s.to_string()), true),
+            (None, _) => (None, false),
         };
 
         // CSV reader options
@@ -287,7 +295,7 @@ impl<'a> ProgramArgs<'a> {
         &self.reader
     }
 
-    pub fn writer(&self) -> &Option<String> {
+    pub fn writer(&self) -> &(Option<String>, bool) {
         &self.writer
     }
 
