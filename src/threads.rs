@@ -3,12 +3,21 @@ use {
     crate::{
         cli::ProgramArgs,
         match_with_log,
-        models::assets::{ReadFrom, Record},
+        models::{
+            assets::{Output, OutputFormat, ReadFrom, Record},
+            get_writer,
+        },
     },
     csv::{ReaderBuilder, StringRecord},
+    serde::{
+        ser::SerializeSeq,
+        {Serialize, Serializer},
+    },
+    serde_json::{map::Map as JMap, value::Value as JsonValue},
+    serde_yaml::{Mapping as YMap, Value as YamlValue},
     std::{
         collections::BTreeSet,
-        io::Read as ioRead,
+        io::{BufWriter, Read as ioRead},
         sync::mpsc::{sync_channel as syncQueue, Receiver, SyncSender},
         thread::{spawn as thSpawn, JoinHandle},
     },
@@ -21,7 +30,8 @@ pub fn spawn_workers(opts: &'static ProgramArgs, from_source: Receiver<Box<dyn i
         Receiver<Receiver<(Vec<String>, Record)>>,
     ) = syncQueue(0);
     // Builder
-    let (BuWr_tx, BuWr_rx): (SyncSender<Receiver<usize>>, Receiver<Receiver<usize>>) = syncQueue(0);
+    let (BuWr_tx, BuWr_rx): (SyncSender<Receiver<Output>>, Receiver<Receiver<Output>>) =
+        syncQueue(0);
     let thReader = thSpawn(move || {
         let tx_builder = ReBu_tx;
         let opts = &opts;
@@ -47,10 +57,18 @@ pub fn spawn_workers(opts: &'static ProgramArgs, from_source: Receiver<Box<dyn i
         let opts = &opts;
 
         while let Some(channel) = rx_reader.iter().next() {
-            let (data_tx, data_rx): (SyncSender<usize>, Receiver<usize>) = syncQueue(10);
+            let (data_tx, data_rx): (SyncSender<Output>, Receiver<Output>) = syncQueue(10);
             tx_writer.send(data_rx).unwrap();
-            channel.iter();
-            unimplemented!()
+            channel
+                .iter()
+                .map(|(header, record)| match opts.output_type() {
+                    OutputFormat::Json => Output::Json(build_json_item(header, record)),
+                    OutputFormat::JsonPretty => Output::Json(build_json_item(header, record)),
+                    OutputFormat::Yaml => Output::Yaml(build_yaml_item(header, record)),
+                })
+                .for_each(|item| {
+                    data_tx.send(item).unwrap();
+                })
         }
 
         // TODO: handle thread cleanup
@@ -62,11 +80,76 @@ pub fn spawn_workers(opts: &'static ProgramArgs, from_source: Receiver<Box<dyn i
     let thWriter = thSpawn(move || {
         let rx_builder = BuWr_rx;
         let opts = &opts;
+        let mut writer = BufWriter::new(get_writer(opts.writer()));
 
         while let Some(channel) = rx_builder.iter().next() {
-            unimplemented!()
+            let mut ser = serde_json::Serializer::new(&mut writer);
+            let mut seq = ser.serialize_seq(None).unwrap();
+            channel.iter().for_each(|output| {
+                seq.serialize_element(&output).unwrap();
+            });
+            seq.end().unwrap();
         }
     });
+}
+
+pub fn build_json_item(hdr: Vec<String>, record: Record) -> JsonValue {
+    let mut headers = hdr.iter().take(record.field_count as usize);
+    let mut records = record.data.iter();
+    let mut output = JMap::new();
+    loop {
+        let h_item = headers.next();
+        let r_item = records.next();
+        trace!("header: {:?}, field: {:?}", h_item, r_item);
+
+        if h_item != None || r_item != None {
+            let h_json = match h_item {
+                Some(hdr) => hdr,
+                None => "",
+            };
+            let r_json = match r_item {
+                Some(rcd) => rcd,
+                None => "",
+            };
+            output.insert(h_json.to_string(), JsonValue::String(r_json.to_string()));
+        } else {
+            break;
+        }
+    }
+    trace!("Map contents: {:?}", &output);
+
+    JsonValue::Object(output)
+}
+
+pub fn build_yaml_item(hdr: Vec<String>, record: Record) -> YamlValue {
+    let mut headers = hdr.iter().take(record.field_count as usize);
+    let mut records = record.data.iter();
+    let mut output = YMap::new();
+    loop {
+        let h_item = headers.next();
+        let r_item = records.next();
+        trace!("header: {:?}, field: {:?}", h_item, r_item);
+
+        if h_item != None || r_item != None {
+            let h_json = match h_item {
+                Some(hdr) => hdr,
+                None => "",
+            };
+            let r_json = match r_item {
+                Some(rcd) => rcd,
+                None => "",
+            };
+            output.insert(
+                YamlValue::String(h_json.to_string()),
+                YamlValue::String(r_json.to_string()),
+            );
+        } else {
+            break;
+        }
+    }
+    trace!("Map contents: {:?}", &output);
+
+    YamlValue::Mapping(output)
 }
 
 pub fn parse_csv_source<R>(
