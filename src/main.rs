@@ -17,6 +17,7 @@ use {
 
 mod cli;
 mod models;
+mod threads;
 
 fn main() -> ProgramExit<ErrorKind> {
     // Start Pre-program code, do not place anything above these lines
