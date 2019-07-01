@@ -23,7 +23,10 @@ use {
     },
 };
 
-pub fn spawn_workers(opts: &'static ProgramArgs, from_source: Receiver<Box<dyn ioRead + Send>>) {
+pub fn spawn_workers(
+    opts: &'static ProgramArgs,
+    from_source: Receiver<Box<dyn ioRead + Send>>,
+) -> JoinHandle<()> {
     // Reader
     let (ReBu_tx, ReBu_rx): (
         SyncSender<Receiver<(Vec<String>, Record)>>,
@@ -32,22 +35,38 @@ pub fn spawn_workers(opts: &'static ProgramArgs, from_source: Receiver<Box<dyn i
     // Builder
     let (BuWr_tx, BuWr_rx): (SyncSender<Receiver<Output>>, Receiver<Receiver<Output>>) =
         syncQueue(0);
-    let thReader = thSpawn(move || {
-        let tx_builder = ReBu_tx;
+
+    // Writer
+    let thWriter = thSpawn(move || {
+        let rx_builder = BuWr_rx;
         let opts = &opts;
+        let mut writer = BufWriter::new(get_writer(opts.writer()));
+        info!("Buffered writer initialized");
 
-        while let Some(src) = from_source.iter().next() {
-            let (data_tx, data_rx): (
-                SyncSender<(Vec<String>, Record)>,
-                Receiver<(Vec<String>, Record)>,
-            ) = syncQueue(10);
-            tx_builder.send(data_rx).unwrap();
-            parse_csv_source(&opts, src, data_tx);
+        while let Some(channel) = rx_builder.iter().next() {
+            match opts.output_type() {
+                OutputFormat::Json => {
+            let mut ser = serde_json::Serializer::new(&mut writer);
+            let mut seq = ser.serialize_seq(None).unwrap();
+            channel.iter().for_each(|output| {
+                seq.serialize_element(&output).unwrap();
+            });
+            seq.end().unwrap();
+                },
+                OutputFormat::JsonPretty => {
+                    let mut ser = serde_json::Serializer::pretty(&mut writer);
+            let mut seq = ser.serialize_seq(None).unwrap();
+            channel.iter().for_each(|output| {
+                seq.serialize_element(&output).unwrap();
+            });
+            seq.end().unwrap();
+                },
+                OutputFormat::Yaml => {
+                    let all_output: Vec<Output> = channel.iter().collect();
+                    serde_yaml::to_writer(&mut writer, &all_output);
+                }
+            }
         }
-
-        // TODO: handle thread cleanup
-        drop(tx_builder);
-        // thBuilder.join()
     });
 
     // Builder
@@ -73,24 +92,28 @@ pub fn spawn_workers(opts: &'static ProgramArgs, from_source: Receiver<Box<dyn i
 
         // TODO: handle thread cleanup
         drop(tx_writer);
-        // thWriter.join()
+        thWriter.join();
     });
 
-    // Writer
-    let thWriter = thSpawn(move || {
-        let rx_builder = BuWr_rx;
+    let thReader = thSpawn(move || {
+        let tx_builder = ReBu_tx;
         let opts = &opts;
-        let mut writer = BufWriter::new(get_writer(opts.writer()));
 
-        while let Some(channel) = rx_builder.iter().next() {
-            let mut ser = serde_json::Serializer::new(&mut writer);
-            let mut seq = ser.serialize_seq(None).unwrap();
-            channel.iter().for_each(|output| {
-                seq.serialize_element(&output).unwrap();
-            });
-            seq.end().unwrap();
+        while let Some(src) = from_source.iter().next() {
+            let (data_tx, data_rx): (
+                SyncSender<(Vec<String>, Record)>,
+                Receiver<(Vec<String>, Record)>,
+            ) = syncQueue(10);
+            tx_builder.send(data_rx).unwrap();
+            parse_csv_source(&opts, src, data_tx);
         }
+
+        // TODO: handle thread cleanup
+        drop(tx_builder);
+        thBuilder.join();
     });
+
+    thReader
 }
 
 pub fn build_json_item(hdr: Vec<String>, record: Record) -> JsonValue {
