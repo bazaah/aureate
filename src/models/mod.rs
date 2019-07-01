@@ -65,7 +65,7 @@ pub fn get_reader(r: Option<&str>) -> Option<ReadFrom> {
 }
 
 // Opens a read source, defaults to stdin if source errors
-pub fn set_reader(src: &Option<ReadFrom>) -> Box<dyn ioRead> {
+pub fn set_reader(src: &Option<ReadFrom>) -> Box<dyn ioRead + Send> {
     match src {
         Some(s) => match s {
             ReadFrom::File(path) => match_with_log!(
