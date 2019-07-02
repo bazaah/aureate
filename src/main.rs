@@ -46,7 +46,7 @@ fn main() -> ProgramExit<ErrorKind> {
     }
 
     drop(tx);
-    reader.join();
+    reader?.join();
 
     ProgramExit::Success
 }
