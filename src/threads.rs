@@ -1,4 +1,4 @@
-#![allow(non_snake_case, dead_code)]
+#![allow(non_snake_case)]
 use {
     crate::{
         cli::ProgramArgs,
@@ -46,21 +46,21 @@ pub fn spawn_workers(
         while let Some(channel) = rx_builder.iter().next() {
             match opts.output_type() {
                 OutputFormat::Json => {
-            let mut ser = serde_json::Serializer::new(&mut writer);
-            let mut seq = ser.serialize_seq(None).unwrap();
-            channel.iter().for_each(|output| {
-                seq.serialize_element(&output).unwrap();
-            });
-            seq.end().unwrap();
-                },
+                    let mut ser = serde_json::Serializer::new(&mut writer);
+                    let mut seq = ser.serialize_seq(None).unwrap();
+                    channel.iter().for_each(|output| {
+                        seq.serialize_element(&output).unwrap();
+                    });
+                    seq.end().unwrap();
+                }
                 OutputFormat::JsonPretty => {
                     let mut ser = serde_json::Serializer::pretty(&mut writer);
-            let mut seq = ser.serialize_seq(None).unwrap();
-            channel.iter().for_each(|output| {
-                seq.serialize_element(&output).unwrap();
-            });
-            seq.end().unwrap();
-                },
+                    let mut seq = ser.serialize_seq(None).unwrap();
+                    channel.iter().for_each(|output| {
+                        seq.serialize_element(&output).unwrap();
+                    });
+                    seq.end().unwrap();
+                }
                 OutputFormat::Yaml => {
                     let all_output: Vec<Output> = channel.iter().collect();
                     serde_yaml::to_writer(&mut writer, &all_output);
@@ -224,13 +224,6 @@ pub fn parse_csv_source<R>(
         .for_each(|(header, record)| {
             tx_builder.send((header, record)).unwrap(); // TODO: this will panic in the shutdown phase, fix it
         });
-}
-
-pub struct ThreadWrapper {
-    pub reader: JoinHandle<()>,
-    pub header: JoinHandle<()>,
-    pub builder: JoinHandle<()>,
-    pub writer: JoinHandle<()>,
 }
 
 #[derive(Clone)]
