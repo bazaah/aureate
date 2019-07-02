@@ -1,8 +1,10 @@
 use {
+    csv::StringRecord,
     serde::Serialize,
-    serde_json::{map::Map as JMap, value::Value as JsonValue},
-    serde_yaml::{Mapping as YMap, Value as YamlValue},
+    serde_json::value::Value as JsonValue,
+    serde_yaml::Value as YamlValue,
     std::{
+        collections::BTreeSet,
         iter,
         iter::{FromIterator, Iterator},
         mem,
@@ -28,77 +30,6 @@ pub enum Output {
     Yaml(YamlValue),
 }
 
-// Helper function for building Json compliant memory representations
-pub fn build_json(hdr: Vec<&str>, record_list: Vec<Record>) -> JsonValue {
-    record_list
-        .into_iter()
-        .map(|record| {
-            let mut headers = hdr.iter().take(record.field_count as usize);
-            let mut records = record.data.iter();
-            let mut output = JMap::new();
-            loop {
-                let h_item = headers.next();
-                let r_item = records.next();
-                trace!("header: {:?}, field: {:?}", h_item, r_item);
-
-                if h_item != None || r_item != None {
-                    let h_json = match h_item {
-                        Some(hdr) => hdr,
-                        None => "",
-                    };
-                    let r_json = match r_item {
-                        Some(rcd) => rcd,
-                        None => "",
-                    };
-                    output.insert(h_json.to_string(), JsonValue::String(r_json.to_string()));
-                } else {
-                    break;
-                }
-            }
-            trace!("Map contents: {:?}", &output);
-
-            output
-        })
-        .collect::<JsonValue>()
-}
-
-// Helper function for building Yaml compliant memory representations
-pub fn build_yaml(hdr: Vec<&str>, record_list: Vec<Record>) -> YamlValue {
-    record_list
-        .into_iter()
-        .map(|record| {
-            let mut headers = hdr.iter().take(record.field_count as usize);
-            let mut records = record.data.iter();
-            let mut output = YMap::new();
-            loop {
-                let h_item = headers.next();
-                let r_item = records.next();
-                trace!("header: {:?}, field: {:?}", h_item, r_item);
-
-                if h_item != None || r_item != None {
-                    let h_json = match h_item {
-                        Some(hdr) => hdr,
-                        None => "",
-                    };
-                    let r_json = match r_item {
-                        Some(rcd) => rcd,
-                        None => "",
-                    };
-                    output.insert(
-                        YamlValue::String(h_json.to_string()),
-                        YamlValue::String(r_json.to_string()),
-                    );
-                } else {
-                    break;
-                }
-            }
-            trace!("Map contents: {:?}", &output);
-
-            output
-        })
-        .collect::<YamlValue>()
-}
-
 // Supported read source options
 #[derive(Debug)]
 pub enum ReadFrom {
@@ -119,6 +50,79 @@ impl std::fmt::Display for ReadFrom {
         };
 
         write!(f, "{}", display)
+    }
+}
+
+#[derive(Clone)]
+pub struct Headers {
+    list: Vec<String>,
+    length: usize,
+}
+
+impl Headers {
+    pub fn new(unparsed_list: &StringRecord) -> Self {
+        let list: Vec<String> = unparsed_list.iter().map(|csv| csv.to_string()).collect();
+        let length = list.len();
+        Headers { list, length }
+    }
+
+    pub fn length(&self) -> u64 {
+        self.length as u64
+    }
+
+    pub fn list_copy(&self) -> Vec<String> {
+        self.list.clone()
+    }
+
+    pub fn extend(&mut self, max_fields: u64) {
+        let mut iter_binding_a;
+        let mut iter_binding_b;
+        let iter: &mut dyn Iterator<Item = (usize, String)> = match max_fields > self.length() {
+            true => {
+                let additional = (self.length() + 1..=max_fields)
+                    .into_iter()
+                    .map(|num| format!("__HEADER__{}", num));
+                iter_binding_a = self.list.iter().cloned().chain(additional).enumerate();
+                &mut iter_binding_a
+            }
+            false => {
+                iter_binding_b = self.list.iter().cloned().enumerate();
+                &mut iter_binding_b
+            }
+        };
+
+        let extended = iter
+            .scan(BTreeSet::new(), |dictionary, (index, header)| {
+                if !dictionary.insert(header.clone()) {
+                    let replacement = format!("__HEADER__{}", index);
+                    let tail = match index {
+                        i if i == 1 => format_args!("st"),
+                        i if i == 2 => format_args!("nd"),
+                        i if i == 3 => format_args!("rd"),
+                        _ => format_args!("th"),
+                    };
+                    warn!(
+                        "{}{} header is a duplicate! replacing [{}] with: [{}]",
+                        index, tail, &header, replacement
+                    );
+
+                    dictionary.insert(replacement.clone());
+                    Some(replacement)
+                } else {
+                    Some(header)
+                }
+            })
+            .collect::<Vec<String>>();
+
+        self.transmute(extended);
+    }
+
+    fn transmute(&mut self, replacement: Vec<String>) {
+        let new_list = replacement;
+        let new_length = new_list.len();
+
+        std::mem::replace(&mut self.list, new_list);
+        self.length = new_length;
     }
 }
 

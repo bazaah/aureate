@@ -8,15 +8,14 @@ use {
     crate::{
         cli::{generate_cli, ProgramArgs},
         models::{
-            compose, csv_from_source,
             error::{ErrorKind, ProgramExit},
-            get_writer, outwriter, set_reader,
+            set_reader,
         },
         threads::spawn_workers,
     },
     simplelog::*,
     std::{
-        io::{BufWriter, Read as ioRead},
+        io::Read as ioRead,
         sync::mpsc::{sync_channel as syncQueue, Receiver, SyncSender},
     },
 };

@@ -2,17 +2,17 @@ use {
     crate::{
         cli::ProgramArgs,
         match_with_log,
-        models::assets::{build_json, build_yaml, Output, OutputFormat, ReadFrom, Record},
+        models::assets::{Headers, ReadFrom, Record},
     },
     csv::ReaderBuilder,
-    serde::Serialize,
+    serde_json::{map::Map as JMap, value::Value as JsonValue},
+    serde_yaml::{Mapping as YMap, Value as YamlValue},
     std::{
         boxed::Box,
-        collections::BTreeSet,
-        error::Error,
         fs::{File, OpenOptions},
         io::{stdin as cin, stdout as cout, Read as ioRead, Write as ioWrite},
         path::PathBuf,
+        sync::mpsc::SyncSender,
         vec::Vec,
     },
 };
@@ -89,11 +89,11 @@ pub fn set_reader(src: &Option<ReadFrom>) -> Box<dyn ioRead + Send> {
 
 // Parses CSV source into a manipulatable format
 // that other functions can use to build JSON/YAML structures
-pub fn csv_from_source<R>(
+pub fn parse_csv_source<R>(
     opts: &ProgramArgs,
     source: R,
-) -> Result<(Vec<String>, Vec<Record>), Box<dyn Error>>
-where
+    tx_builder: SyncSender<(Vec<String>, Record)>,
+) where
     R: ioRead,
 {
     let mut rdr = ReaderBuilder::new()
@@ -107,12 +107,10 @@ where
         .quoting(opts.quote_settings().1)
         .from_reader(source);
 
-    // Track maximum record row length
-    let mut max_record_fields = 0u64;
+    let mut headers: Headers = Headers::new(rdr.headers().unwrap());
+    headers.extend(0);
 
-    // Parse records
-    let records = rdr
-        .records()
+    rdr.records()
         // Skip rows which error based on the CSV parser options, with a warning
         .filter_map(|result| match result {
             Ok(r) => Some(r),
@@ -129,111 +127,124 @@ where
                 })
                 .collect::<Record>()
         })
-        .inspect(|wrapper| {
-            if max_record_fields < wrapper.field_count {
-                max_record_fields = wrapper.field_count;
+        .map(|wrapper| {
+            let record_length = wrapper.field_count;
+            if headers.length() < record_length {
+                headers.extend(record_length)
             }
+
+            (headers.list_copy(), wrapper)
         })
-        .collect::<Vec<Record>>();
-
-    info!("Highest record field length: {}", max_record_fields);
-
-    // Parse headers
-    let csv_headers = rdr.headers()?;
-    let hdr_fields = csv_headers.len();
-    let max_fields = max_record_fields as usize;
-
-    // Adds additional headers if any record row's length > header row length
-    let mut iter_binding_a;
-    let mut iter_binding_b;
-    let iter: &mut dyn Iterator<Item = (usize, String)> = match max_fields > hdr_fields {
-        true => {
-            let additional = (hdr_fields + 1..=max_fields)
-                .into_iter()
-                .map(|num| format!("__HEADER__{}", num));
-            iter_binding_a = csv_headers
-                .iter()
-                .map(|h| h.to_string())
-                .chain(additional)
-                .enumerate();
-            &mut iter_binding_a
-        }
-        false => {
-            iter_binding_b = csv_headers.iter().map(|h| h.to_string()).enumerate();
-            &mut iter_binding_b
-        }
-    };
-    // Deduplicate headers and build the Json sanitized headers list
-    let headers = iter
-        .scan(BTreeSet::new(), |dictionary, (index, header)| {
-            if !dictionary.insert(header.clone()) {
-                let replacement = format!("__HEADER__{}", index);
-                let tail = match index {
-                    i if i == 1 => format_args!("st"),
-                    i if i == 2 => format_args!("nd"),
-                    i if i == 3 => format_args!("rd"),
-                    _ => format_args!("th"),
-                };
-                warn!(
-                    "{}{} header is a duplicate! replacing [{}] with: [{}]",
-                    index, tail, &header, replacement
-                );
-
-                dictionary.insert(replacement.clone());
-                Some(replacement)
-            } else {
-                Some(header)
-            }
-        })
-        .collect::<Vec<String>>();
-
-    Ok((headers, records))
+        .for_each(|(header, record)| {
+            tx_builder.send((header, record)).unwrap(); // TODO: this will panic in the shutdown phase, fix it
+        });
 }
 
 // JSON builder function, as JSON is a subset (mostly)
 // of YAML this function also builds YAML representable data
-pub fn compose(opts: &ProgramArgs, data: (Vec<String>, Vec<Record>)) -> Output {
-    let (header, record_list) = data;
-    let hdr = header.iter().map(|s| &**s).collect::<Vec<&str>>();
+// pub fn compose(opts: &ProgramArgs, data: (Vec<String>, Vec<Record>)) -> Output {
+//     let (header, record_list) = data;
+//     let hdr = header.iter().map(|s| &**s).collect::<Vec<&str>>();
 
-    match opts.output_type() {
-        OutputFormat::Json => Output::Json(build_json(hdr, record_list)),
-        OutputFormat::JsonPretty => Output::Json(build_json(hdr, record_list)),
-        OutputFormat::Yaml => Output::Yaml(build_yaml(hdr, record_list)),
+//     match opts.output_type() {
+//         OutputFormat::Json => Output::Json(build_json(hdr, record_list)),
+//         OutputFormat::JsonPretty => Output::Json(build_json(hdr, record_list)),
+//         OutputFormat::Yaml => Output::Yaml(build_yaml(hdr, record_list)),
+//     }
+// }
+
+// // Serialization of the composed data occurs here
+// pub fn outwriter<W, S: ?Sized>(
+//     opts: &ProgramArgs,
+//     writer: W,
+//     output: &S,
+// ) -> Result<(), Box<dyn Error>>
+// where
+//     W: ioWrite,
+//     S: Serialize,
+// {
+//     match opts.output_type() {
+//         OutputFormat::JsonPretty => match_with_log!(
+//             match serde_json::to_writer_pretty(writer, &output) {
+//                 Ok(_) => Ok(()),
+//                 Err(e) => Err(Box::new(e)),
+//             },
+//             info!("Using pretty Json writer")
+//         ),
+//         OutputFormat::Json => match_with_log!(
+//             match serde_json::to_writer(writer, &output) {
+//                 Ok(_) => Ok(()),
+//                 Err(e) => Err(Box::new(e)),
+//             },
+//             info!("Using Json writer")
+//         ),
+//         OutputFormat::Yaml => match_with_log!(
+//             match serde_yaml::to_writer(writer, &output) {
+//                 Ok(_) => Ok(()),
+//                 Err(e) => Err(Box::new(e)),
+//             },
+//             info!("Using Yaml writer")
+//         ),
+//     }
+// }
+
+// Helper function for building Json compliant memory representations
+pub fn build_json(hdr: Vec<String>, record: Record) -> JsonValue {
+    let mut headers = hdr.iter().take(record.field_count as usize);
+    let mut records = record.data.iter();
+    let mut output = JMap::new();
+    loop {
+        let h_item = headers.next();
+        let r_item = records.next();
+        trace!("header: {:?}, field: {:?}", h_item, r_item);
+
+        if h_item != None || r_item != None {
+            let h_json = match h_item {
+                Some(hdr) => hdr,
+                None => "",
+            };
+            let r_json = match r_item {
+                Some(rcd) => rcd,
+                None => "",
+            };
+            output.insert(h_json.to_string(), JsonValue::String(r_json.to_string()));
+        } else {
+            break;
+        }
     }
+    trace!("Map contents: {:?}", &output);
+
+    JsonValue::Object(output)
 }
 
-// Serialization of the composed data occurs here
-pub fn outwriter<W, S: ?Sized>(
-    opts: &ProgramArgs,
-    writer: W,
-    output: &S,
-) -> Result<(), Box<dyn Error>>
-where
-    W: ioWrite,
-    S: Serialize,
-{
-    match opts.output_type() {
-        OutputFormat::JsonPretty => match_with_log!(
-            match serde_json::to_writer_pretty(writer, &output) {
-                Ok(_) => Ok(()),
-                Err(e) => Err(Box::new(e)),
-            },
-            info!("Using pretty Json writer")
-        ),
-        OutputFormat::Json => match_with_log!(
-            match serde_json::to_writer(writer, &output) {
-                Ok(_) => Ok(()),
-                Err(e) => Err(Box::new(e)),
-            },
-            info!("Using Json writer")
-        ),
-        OutputFormat::Yaml => match_with_log!(
-            match serde_yaml::to_writer(writer, &output) {
-                Ok(_) => Ok(()),
-                Err(e) => Err(Box::new(e)),
-            },
-            info!("Using Yaml writer")
-        ),
+// Helper function for building Yaml compliant memory representations
+pub fn build_yaml(hdr: Vec<String>, record: Record) -> YamlValue {
+    let mut headers = hdr.iter().take(record.field_count as usize);
+    let mut records = record.data.iter();
+    let mut output = YMap::new();
+    loop {
+        let h_item = headers.next();
+        let r_item = records.next();
+        trace!("header: {:?}, field: {:?}", h_item, r_item);
+
+        if h_item != None || r_item != None {
+            let h_json = match h_item {
+                Some(hdr) => hdr,
+                None => "",
+            };
+            let r_json = match r_item {
+                Some(rcd) => rcd,
+                None => "",
+            };
+            output.insert(
+                YamlValue::String(h_json.to_string()),
+                YamlValue::String(r_json.to_string()),
+            );
+        } else {
+            break;
+        }
     }
+    trace!("Map contents: {:?}", &output);
+
+    YamlValue::Mapping(output)
 }
