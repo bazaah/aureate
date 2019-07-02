@@ -10,6 +10,7 @@ use {
     },
     serde::{ser::SerializeSeq, Serializer},
     std::{
+        error::Error,
         io::{BufWriter, Read as ioRead},
         sync::mpsc::{sync_channel as syncQueue, Receiver, SyncSender},
         thread::{spawn as thSpawn, JoinHandle},
@@ -19,7 +20,7 @@ use {
 pub fn spawn_workers(
     opts: &'static ProgramArgs,
     from_source: Receiver<Box<dyn ioRead + Send>>,
-) -> JoinHandle<()> {
+) -> Result<JoinHandle<()>, Box<dyn Error>> {
     // Reader
     let (ReBu_tx, ReBu_rx): (
         SyncSender<Receiver<(Vec<String>, Record)>>,
@@ -86,7 +87,9 @@ pub fn spawn_workers(
 
         while let Some(channel) = rx_reader.iter().next() {
             let (data_tx, data_rx): (SyncSender<Output>, Receiver<Output>) = syncQueue(10);
-            tx_writer.send(data_rx).unwrap();
+            tx_writer
+                .send(data_rx)
+                .expect("Error in getting data from reader");
             channel
                 .iter()
                 .map(|(header, record)| match opts.output_type() {
@@ -95,7 +98,7 @@ pub fn spawn_workers(
                     OutputFormat::Yaml => Output::Yaml(build_yaml(header, record)),
                 })
                 .for_each(|item| {
-                    data_tx.send(item).unwrap();
+                    data_tx.send(item).expect("Error in sending data to writer");
                 })
         }
 
@@ -115,7 +118,7 @@ pub fn spawn_workers(
                 SyncSender<(Vec<String>, Record)>,
                 Receiver<(Vec<String>, Record)>,
             ) = syncQueue(10);
-            tx_builder.send(data_rx).unwrap();
+            tx_builder.send(data_rx).expect("Error in read thread");
             parse_csv_source(&opts, src, data_tx);
         }
 
@@ -125,5 +128,5 @@ pub fn spawn_workers(
         debug!("Reader closing");
     });
 
-    thReader
+    Ok(thReader)
 }
