@@ -2,7 +2,10 @@ use {
     crate::{
         cli::ProgramArgs,
         match_with_log,
-        models::assets::{Headers, ReadFrom, Record},
+        models::{
+            assets::{Headers, ReadFrom, Record},
+            error::ErrorKind,
+        },
     },
     csv::ReaderBuilder,
     serde_json::{map::Map as JMap, value::Value as JsonValue},
@@ -10,7 +13,7 @@ use {
     std::{
         boxed::Box,
         fs::{File, OpenOptions},
-        io::{stdin as cin, stdout as cout, BufReader, Cursor, Read as ioRead, Write as ioWrite},
+        io::{stdin as cin, stdout as cout, Read as ioRead, Write as ioWrite},
         path::PathBuf,
         sync::mpsc::SyncSender,
         vec::Vec,
@@ -89,11 +92,12 @@ pub fn set_reader(src: &Option<ReadFrom>) -> Box<dyn ioRead + Send> {
 
 // Parses CSV source into a manipulatable format
 // that other functions can use to build JSON/YAML structures
-pub fn parse_csv_source<R>(
+pub(crate) fn parse_csv_source<R>(
     opts: &ProgramArgs,
     source: R,
     tx_builder: SyncSender<(Vec<String>, Record)>,
-) where
+) -> Result<(), ErrorKind>
+where
     R: ioRead,
 {
     let mut rdr = ReaderBuilder::new()
@@ -110,7 +114,9 @@ pub fn parse_csv_source<R>(
     let mut headers: Headers = Headers::new(rdr.headers().unwrap());
     headers.extend(0);
 
-    rdr.records()
+    // Hot loop
+    let res = rdr
+        .records()
         // Skip rows which error based on the CSV parser options, with a warning
         .filter_map(|result| match result {
             Ok(r) => Some(r),
@@ -134,10 +140,16 @@ pub fn parse_csv_source<R>(
             }
 
             (headers.list_copy(), wrapper)
-        })
-        .for_each(|(header, record)| {
-            tx_builder.send((header, record)).unwrap(); // TODO: this will panic in the shutdown phase, fix it
         });
+    for (header, record) in res {
+        tx_builder.send((header, record)).map_err(|_| {
+            ErrorKind::UnexpectedChannelClose(format!(
+                "builder in |reader -> builder| channel has hung up"
+            ))
+        })?;
+    }
+
+    Ok(())
 }
 
 // Helper function for building Json compliant memory representations
@@ -200,51 +212,3 @@ pub fn build_yaml(hdr: Vec<String>, record: Record) -> YamlValue {
 
     YamlValue::Mapping(output)
 }
-
-// JSON builder function, as JSON is a subset (mostly)
-// of YAML this function also builds YAML representable data
-// pub fn compose(opts: &ProgramArgs, data: (Vec<String>, Vec<Record>)) -> Output {
-//     let (header, record_list) = data;
-//     let hdr = header.iter().map(|s| &**s).collect::<Vec<&str>>();
-
-//     match opts.output_type() {
-//         OutputFormat::Json => Output::Json(build_json(hdr, record_list)),
-//         OutputFormat::JsonPretty => Output::Json(build_json(hdr, record_list)),
-//         OutputFormat::Yaml => Output::Yaml(build_yaml(hdr, record_list)),
-//     }
-// }
-
-// // Serialization of the composed data occurs here
-// pub fn outwriter<W, S: ?Sized>(
-//     opts: &ProgramArgs,
-//     writer: W,
-//     output: &S,
-// ) -> Result<(), Box<dyn Error>>
-// where
-//     W: ioWrite,
-//     S: Serialize,
-// {
-//     match opts.output_type() {
-//         OutputFormat::JsonPretty => match_with_log!(
-//             match serde_json::to_writer_pretty(writer, &output) {
-//                 Ok(_) => Ok(()),
-//                 Err(e) => Err(Box::new(e)),
-//             },
-//             info!("Using pretty Json writer")
-//         ),
-//         OutputFormat::Json => match_with_log!(
-//             match serde_json::to_writer(writer, &output) {
-//                 Ok(_) => Ok(()),
-//                 Err(e) => Err(Box::new(e)),
-//             },
-//             info!("Using Json writer")
-//         ),
-//         OutputFormat::Yaml => match_with_log!(
-//             match serde_yaml::to_writer(writer, &output) {
-//                 Ok(_) => Ok(()),
-//                 Err(e) => Err(Box::new(e)),
-//             },
-//             info!("Using Yaml writer")
-//         ),
-//     }
-// }
