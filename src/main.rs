@@ -39,14 +39,23 @@ fn main() -> ProgramExit<ErrorKind> {
         Receiver<Box<dyn ioRead + Send>>,
     ) = syncQueue(1);
 
-    let reader = spawn_workers(&CLI, rx);
+    let reader = spawn_workers(&CLI, rx)?;
     for source in CLI.reader_list() {
         let read_from: Box<dyn ioRead + Send> = set_reader(source);
-        tx.send(read_from).unwrap();
+        tx.send(read_from).map_err(|_| {
+            ErrorKind::UnexpectedChannelClose(format!(
+                "reader in |main -> reader| channel has hung up"
+            ))
+        })?;
     }
 
     drop(tx);
-    reader?.join();
+    reader.join().map_err(|_| {
+        ErrorKind::ThreadFailed(format!(
+            "{}",
+            std::thread::current().name().unwrap_or("unnamed")
+        ))
+    })??;
 
     ProgramExit::Success
 }
