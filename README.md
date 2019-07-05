@@ -19,6 +19,7 @@ It is written in pure rust and makes use of the [serde](https://serde.rs/) libra
 #### OPTIONS
 
 * `-f, --format <format>`    Set output data format [default: prettyj]  [possible values: prettyj, json, yaml]
+  * Due to library limitations, 'yaml' does not stream out, leading to memory use which scales linearly with input size
 * `-i, --input <FILE>...`    Input file path(s) separated by commas, with a '-' representing stdin
 * `-o, --output <FILE>`      Specify an output file path, defaults to stdout
 
@@ -34,7 +35,7 @@ It is written in pure rust and makes use of the [serde](https://serde.rs/) libra
 
     * #### FLAGS
 
-        * `--flexible`    Prevents program from erroring on non-uniform row fields
+        * `--flexible`    Hint to program that non-uniform rows should be handled, instead of ignored
 
     * #### OPTIONS
 

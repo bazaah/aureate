@@ -137,9 +137,9 @@ pub fn generate_cli<'a>() -> Matches<'a> {
     matches
 }
 
-pub struct ProgramArgs<'a> {
+pub struct ProgramArgs {
     // Program
-    _store: Matches<'a>,
+    //_store: Matches<'a>,
     debug_level: LevelFilter,
     output_type: OutputFormat,
     reader: Vec<Option<ReadFrom>>,
@@ -154,7 +154,7 @@ pub struct ProgramArgs<'a> {
     quote_settings_csv: CSVOption,
 }
 
-impl<'a> ProgramArgs<'a> {
+impl<'a> ProgramArgs {
     pub fn init(store: Matches<'a>) -> Self {
         let debug_level = match (store.occurrences_of("verbosity"), store.is_present("quiet")) {
             (_, true) => LevelFilter::Off,
@@ -266,7 +266,7 @@ impl<'a> ProgramArgs<'a> {
 
         Self {
             //Program Options
-            _store: store,
+            //_store: store,
             debug_level,
             output_type,
             reader,
