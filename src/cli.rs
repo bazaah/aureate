@@ -18,7 +18,7 @@ pub fn generate_cli<'a>() -> Matches<'a> {
             Arg::with_name("verbosity")
                 .short("v")
                 .multiple(true)
-                .max_values(4)
+                .max_values(64)
                 .takes_value(false)
                 .help("Sets level of debug output"),
         )
@@ -158,8 +158,9 @@ impl<'a> ProgramArgs {
     pub fn init(store: Matches<'a>) -> Self {
         let debug_level = match (store.occurrences_of("verbosity"), store.is_present("quiet")) {
             (_, true) => LevelFilter::Off,
-            (0, false) => LevelFilter::Info,
-            (1, false) => LevelFilter::Debug,
+            (0, false) => LevelFilter::Warn,
+            (1, false) => LevelFilter::Info,
+            (2, false) => LevelFilter::Debug,
             (_, false) => LevelFilter::Trace,
         };
 
