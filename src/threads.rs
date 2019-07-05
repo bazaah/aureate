@@ -18,6 +18,10 @@ use {
     },
 };
 
+// Spawns workers and the channels which communicate input segments.
+// Each input source "from_source" is assigned a new channel, and said channel's
+// rx sent through the "meta channels." This implementation ensures that the control
+// flow mirrors the data flow
 pub(crate) fn spawn_workers(
     opts: &'static ProgramArgs,
     from_source: Receiver<Box<dyn ioRead + Send>>,
@@ -89,7 +93,7 @@ pub(crate) fn spawn_workers(
                 // Cleanup
                 debug!("Writer closing");
                 Ok(())
-            });
+            })?;
 
     // Builder
     let thBuilder =
@@ -127,7 +131,7 @@ pub(crate) fn spawn_workers(
 
                 // Cleanup
                 drop(tx_writer);
-                thWriter?.join().map_err(|_| {
+                thWriter.join().map_err(|_| {
                     ErrorKind::ThreadFailed(format!(
                         "{}",
                         std::thread::current().name().unwrap_or("unnamed")

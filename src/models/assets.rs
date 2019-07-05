@@ -53,6 +53,9 @@ impl std::fmt::Display for ReadFrom {
     }
 }
 
+// Object responsible for ensuring its header list
+// is unique contains at least as many fields as the
+// largest Record field list
 #[derive(Clone)]
 pub struct Headers {
     list: Vec<String>,
@@ -74,9 +77,12 @@ impl Headers {
         self.list.clone()
     }
 
+    // Logic for deduping and extending the Header list
     pub fn extend(&mut self, max_fields: u64) {
         let mut iter_binding_a;
         let mut iter_binding_b;
+
+        // Checks length
         let iter: &mut dyn Iterator<Item = (usize, String)> = match max_fields > self.length() {
             true => {
                 let additional = (self.length() + 1..=max_fields)
@@ -91,6 +97,7 @@ impl Headers {
             }
         };
 
+        // Checks duplicates
         let extended = iter
             .scan(BTreeSet::new(), |dictionary, (index, header)| {
                 if !dictionary.insert(header.clone()) {
