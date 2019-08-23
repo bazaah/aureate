@@ -1,3 +1,4 @@
+#![allow(deprecated)]
 use {
     crate::models::{
         assets::{OutputFormat, ReadFrom},
@@ -172,13 +173,18 @@ impl<'a> ProgramArgs {
         };
 
         let reader = match store.values_of("input") {
-            Some(inputs) => {
-                let mut list: Vec<_> = inputs.collect();
-                list.dedup_by_key(|f| *f == "-");
-                list.iter()
-                    .map(|s| get_reader(Some(s)))
-                    .collect::<Vec<Option<ReadFrom>>>()
-            }
+            Some(inputs) => inputs
+                .scan(false, |acc, item| match item {
+                    "-" if *acc => Some((*acc, item)),
+                    "-" => {
+                        *acc = true;
+                        Some((false, item))
+                    }
+                    _ => Some((false, item)),
+                })
+                .filter(|(dupe, _)| !dupe)
+                .map(|(_, s)| get_reader(Some(s)))
+                .collect::<Vec<Option<ReadFrom>>>(),
             None => {
                 let mut vec: Vec<Option<ReadFrom>> = Vec::new();
                 let i = get_reader(None);
